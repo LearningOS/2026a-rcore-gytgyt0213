@@ -1,5 +1,7 @@
 //! File trait & inode(dir, file, pipe, stdin, stdout)
 
+// AI 学习协助：本文件的实验增量由 AI 助手协助实现，逐处说明见 Study/修改记录。
+// 参考：https://learningos.cn/rCore-Tutorial-Guide/chapter6/；原始代码来自课程模板，未改动官方评测器。
 mod inode;
 mod stdio;
 
@@ -7,6 +9,8 @@ use crate::mm::UserBuffer;
 
 /// trait File for all file types
 pub trait File: Send + Sync {
+    /// Metadata exists for filesystem files, not for unsupported device types.
+    fn stat(&self) -> Option<Stat> { None }
     /// the file readable?
     fn readable(&self) -> bool;
     /// the file writable?
@@ -33,6 +37,13 @@ pub struct Stat {
     pad: [u64; 7],
 }
 
+impl Stat {
+    /// Initialize every byte, including the compatibility padding.
+    pub fn new(ino: u64, mode: StatMode, nlink: u32) -> Self {
+        Self { dev: 0, ino, mode, nlink, pad: [0; 7] }
+    }
+}
+
 bitflags! {
     /// The mode of a inode
     /// whether a directory or a file
@@ -47,4 +58,5 @@ bitflags! {
 }
 
 pub use inode::{list_apps, open_file, OSInode, OpenFlags};
+pub use inode::{link_file, unlink_file};
 pub use stdio::{Stdin, Stdout};

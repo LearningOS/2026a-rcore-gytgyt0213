@@ -4,6 +4,8 @@
 //!
 //! `UPSafeCell<OSInodeInner>` -> `OSInode`: for static `ROOT_INODE`,we
 //! need to wrap `OSInodeInner` into `UPSafeCell`
+// AI 学习协助：本文件的实验增量由 AI 助手协助实现，逐处说明见 Study/修改记录。
+// 参考：https://learningos.cn/rCore-Tutorial-Guide/chapter6/；原始代码来自课程模板，未改动官方评测器。
 use super::File;
 use crate::drivers::BLOCK_DEVICE;
 use crate::mm::UserBuffer;
@@ -31,6 +33,7 @@ pub struct OSInodeInner {
 impl OSInode {
     /// create a new inode in memory
     pub fn new(readable: bool, writable: bool, inode: Arc<Inode>) -> Self {
+        inode.open();
         Self {
             readable,
             writable,
@@ -126,6 +129,12 @@ pub fn open_file(name: &str, flags: OpenFlags) -> Option<Arc<OSInode>> {
 }
 
 impl File for OSInode {
+    fn stat(&self) -> Option<super::Stat> {
+        let inner = self.inner.exclusive_access();
+        let (id, is_dir, nlink) = inner.inode.stat();
+        let mode = if is_dir { super::StatMode::DIR } else { super::StatMode::FILE };
+        Some(super::Stat::new(id as u64, mode, nlink))
+    }
     fn readable(&self) -> bool {
         self.readable
     }
@@ -157,3 +166,13 @@ impl File for OSInode {
         total_write_size
     }
 }
+
+impl Drop for OSInode {
+    fn drop(&mut self) { self.inner.exclusive_access().inode.close(); }
+}
+
+/// Create a second directory name for one inode.
+pub fn link_file(old: &str, new: &str) -> bool { ROOT_INODE.link(old, new) }
+
+/// Remove a name and reclaim an unreferenced file.
+pub fn unlink_file(name: &str) -> bool { ROOT_INODE.unlink(name) }
