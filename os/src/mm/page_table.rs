@@ -1,4 +1,6 @@
 //! Implementation of [`PageTableEntry`] and [`PageTable`].
+// AI 学习协助：本文件的实验增量由 AI 助手协助实现，逐处说明见 Study/修改记录。
+// 参考：https://learningos.cn/rCore-Tutorial-Guide/chapter8/；原始代码来自课程模板，未改动官方评测器。
 use super::{frame_alloc, FrameTracker, PhysAddr, PhysPageNum, StepByOne, VirtAddr, VirtPageNum};
 use alloc::string::String;
 use alloc::vec;
@@ -139,7 +141,7 @@ impl PageTable {
     }
     /// get the page table entry from the virtual page number
     pub fn translate(&self, vpn: VirtPageNum) -> Option<PageTableEntry> {
-        self.find_pte(vpn).map(|pte| *pte)
+        self.find_pte(vpn).filter(|pte| pte.is_valid()).map(|pte| *pte)
     }
     /// get the physical address from the virtual address
     pub fn translate_va(&self, va: VirtAddr) -> Option<PhysAddr> {
@@ -157,6 +159,42 @@ impl PageTable {
 }
 
 /// Create mutable `Vec<u8>` slice in kernel space from ptr in other address space. NOTICE: the content pointed to by the pointer `ptr` can cross physical pages.
+
+/// Validate every user page before copying; reject supervisor-only mappings.
+pub fn checked_user_buffer(token: usize, ptr: usize, len: usize, write: bool)
+    -> Option<Vec<&'static mut [u8]>>
+{
+    let end = ptr.checked_add(len)?;
+    if end > (1usize << 38) { return None; }
+    let table = PageTable::from_token(token);
+    let required = PTEFlags::U | if write { PTEFlags::W } else { PTEFlags::R };
+    let mut buffers = Vec::new();
+    let mut cursor = ptr;
+    while cursor < end {
+        let va = VirtAddr::from(cursor);
+        let pte = table.translate(va.floor())?;
+        if !pte.flags().contains(required) { return None; }
+        let count = (4096 - va.page_offset()).min(end - cursor);
+        buffers.push(&mut pte.ppn().get_bytes_array()[va.page_offset()..va.page_offset() + count]);
+        cursor += count;
+    }
+    Some(buffers)
+}
+
+/// Copy a structure even when its bytes straddle noncontiguous physical pages.
+pub fn copy_to_user(token: usize, destination: usize, bytes: &[u8]) -> bool {
+    let Some(buffers) = checked_user_buffer(token, destination, bytes.len(), true) else {
+        return false;
+    };
+    let mut copied = 0;
+    for buffer in buffers {
+        let count = buffer.len();
+        buffer.copy_from_slice(&bytes[copied..copied + count]);
+        copied += count;
+    }
+    true
+}
+/// Translate an already trusted user buffer.
 pub fn translated_byte_buffer(token: usize, ptr: *const u8, len: usize) -> Vec<&'static mut [u8]> {
     let page_table = PageTable::from_token(token);
     let mut start = ptr as usize;

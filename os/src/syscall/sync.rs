@@ -1,3 +1,5 @@
+// AI 学习协助：本文件的实验增量由 AI 助手协助实现，逐处说明见 Study/修改记录。
+// 参考：https://learningos.cn/rCore-Tutorial-Guide/chapter8/；原始代码来自课程模板，未改动官方评测器。
 use crate::sync::{Condvar, Mutex, MutexBlocking, MutexSpin, Semaphore};
 use crate::task::{block_current_and_run_next, current_process, current_task};
 use crate::timer::{add_timer, get_time_ms};
@@ -70,9 +72,10 @@ pub fn sys_mutex_lock(mutex_id: usize) -> isize {
     );
     let process = current_process();
     let process_inner = process.inner_exclusive_access();
-    let mutex = Arc::clone(process_inner.mutex_list[mutex_id].as_ref().unwrap());
+    let Some(mutex) = process_inner.mutex_list.get(mutex_id).and_then(|m| m.clone()) else { return -1; };
     drop(process_inner);
     drop(process);
+    if crate::sync::deadlock::would_deadlock(false, mutex_id) { return -0xDEAD; }
     mutex.lock();
     0
 }
@@ -91,7 +94,7 @@ pub fn sys_mutex_unlock(mutex_id: usize) -> isize {
     );
     let process = current_process();
     let process_inner = process.inner_exclusive_access();
-    let mutex = Arc::clone(process_inner.mutex_list[mutex_id].as_ref().unwrap());
+    let Some(mutex) = process_inner.mutex_list.get(mutex_id).and_then(|m| m.clone()) else { return -1; };
     drop(process_inner);
     drop(process);
     mutex.unlock();
@@ -144,7 +147,7 @@ pub fn sys_semaphore_up(sem_id: usize) -> isize {
     );
     let process = current_process();
     let process_inner = process.inner_exclusive_access();
-    let sem = Arc::clone(process_inner.semaphore_list[sem_id].as_ref().unwrap());
+    let Some(sem) = process_inner.semaphore_list.get(sem_id).and_then(|s| s.clone()) else { return -1; };
     drop(process_inner);
     sem.up();
     0
@@ -164,8 +167,9 @@ pub fn sys_semaphore_down(sem_id: usize) -> isize {
     );
     let process = current_process();
     let process_inner = process.inner_exclusive_access();
-    let sem = Arc::clone(process_inner.semaphore_list[sem_id].as_ref().unwrap());
+    let Some(sem) = process_inner.semaphore_list.get(sem_id).and_then(|s| s.clone()) else { return -1; };
     drop(process_inner);
+    if crate::sync::deadlock::would_deadlock(true, sem_id) { return -0xDEAD; }
     sem.down();
     0
 }
@@ -245,7 +249,8 @@ pub fn sys_condvar_wait(condvar_id: usize, mutex_id: usize) -> isize {
 /// enable deadlock detection syscall
 ///
 /// YOUR JOB: Implement deadlock detection, but might not all in this syscall
-pub fn sys_enable_deadlock_detect(_enabled: usize) -> isize {
-    trace!("kernel: sys_enable_deadlock_detect NOT IMPLEMENTED");
-    -1
+pub fn sys_enable_deadlock_detect(enabled: usize) -> isize {
+    if enabled > 1 { return -1; }
+    current_process().inner_exclusive_access().deadlock_detect = enabled == 1;
+    0
 }
