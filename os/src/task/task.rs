@@ -1,5 +1,8 @@
 //! Types related to task management
+// AI 学习协助：本文件的实验增量由 AI 助手协助实现，逐处说明见 Study/修改记录。
+// 参考：https://learningos.cn/rCore-Tutorial-Guide/chapter4/；原始代码来自课程模板，未改动官方评测器。
 use super::TaskContext;
+use alloc::{vec, vec::Vec};
 use crate::config::TRAP_CONTEXT_BASE;
 use crate::mm::{
     kernel_stack_position, MapPermission, MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE,
@@ -28,6 +31,8 @@ pub struct TaskControlBlock {
 
     /// Program break
     pub program_brk: usize,
+    /// Per-task system-call counts, indexed by syscall number.
+    pub syscall_counts: Vec<usize>,
 }
 
 impl TaskControlBlock {
@@ -63,6 +68,7 @@ impl TaskControlBlock {
             base_size: user_sp,
             heap_bottom: user_sp,
             program_brk: user_sp,
+            syscall_counts: vec![0; 512],
         };
         // prepare TrapContext in user space
         let trap_cx = task_control_block.get_trap_cx();

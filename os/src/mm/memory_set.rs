@@ -1,5 +1,7 @@
 //! Implementation of [`MapArea`] and [`MemorySet`].
 
+// AI 学习协助：本文件的实验增量由 AI 助手协助实现，逐处说明见 Study/修改记录。
+// 参考：https://learningos.cn/rCore-Tutorial-Guide/chapter4/；原始代码来自课程模板，未改动官方评测器。
 use super::{frame_alloc, FrameTracker};
 use super::{PTEFlags, PageTable, PageTableEntry};
 use super::{PhysAddr, PhysPageNum, VirtAddr, VirtPageNum};
@@ -40,6 +42,77 @@ pub struct MemorySet {
 }
 
 impl MemorySet {
+
+    /// Map fresh zero-filled user pages, rolling back on allocation failure.
+    pub fn mmap(&mut self, start: usize, len: usize, prot: usize) -> isize {
+        if start % PAGE_SIZE != 0 || prot == 0 || prot & !7 != 0 { return -1; }
+        let Some(end) = start.checked_add(len) else { return -1; };
+        if end > (1usize << 38) { return -1; }
+        if len == 0 { return 0; }
+        let first = start / PAGE_SIZE;
+        let last = (end + PAGE_SIZE - 1) / PAGE_SIZE;
+        if (first..last).any(|vpn| self.translate(VirtPageNum(vpn)).is_some()) { return -1; }
+        let permission = MapPermission::from_bits(((prot as u8) << 1) | MapPermission::U.bits).unwrap();
+        for vpn in first..last {
+            let Some(frame) = frame_alloc() else {
+                self.munmap(start, (vpn - first) * PAGE_SIZE);
+                return -1;
+            };
+            let page = VirtPageNum(vpn);
+            if !self.page_table.try_map(page, frame.ppn, PTEFlags::from_bits(permission.bits).unwrap()) {
+                self.munmap(start, (vpn - first) * PAGE_SIZE);
+                return -1;
+            }
+            let mut area = MapArea::new(VirtAddr(vpn * PAGE_SIZE), VirtAddr((vpn + 1) * PAGE_SIZE),
+                                        MapType::Framed, permission);
+            area.data_frames.insert(page, frame);
+            self.areas.push(area);
+        }
+        0
+    }
+
+    /// Validate first, then unmap and split areas to preserve fork metadata.
+    pub fn munmap(&mut self, start: usize, len: usize) -> isize {
+        if start % PAGE_SIZE != 0 { return -1; }
+        let Some(end) = start.checked_add(len) else { return -1; };
+        if end > (1usize << 38) { return -1; }
+        if len == 0 { return 0; }
+        let first = VirtPageNum(start / PAGE_SIZE);
+        let last = VirtPageNum((end + PAGE_SIZE - 1) / PAGE_SIZE);
+        for vpn in VPNRange::new(first, last) {
+            if !self.translate(vpn).map_or(false, |pte| pte.flags().contains(PTEFlags::U)) {
+                return -1;
+            }
+        }
+        for mut area in core::mem::take(&mut self.areas) {
+            let left = area.vpn_range.get_start();
+            let right = area.vpn_range.get_end();
+            if left >= last || right <= first {
+                self.areas.push(area);
+                continue;
+            }
+            let permission = area.map_perm;
+            let cut_left = left.max(first);
+            let cut_right = right.min(last);
+            for vpn in VPNRange::new(cut_left, cut_right) {
+                area.unmap_one(&mut self.page_table, vpn);
+            }
+            let right_frames = area.data_frames.split_off(&cut_right);
+            if left < cut_left {
+                area.vpn_range = VPNRange::new(left, cut_left);
+                self.areas.push(area);
+            }
+            if cut_right < right {
+                self.areas.push(MapArea {
+                    vpn_range: VPNRange::new(cut_right, right),
+                    data_frames: right_frames,
+                    map_type: MapType::Framed,
+                    map_perm: permission,
+                });
+            }
+        }
+        0
+    }
     /// Create a new empty `MemorySet`.
     pub fn new_bare() -> Self {
         Self {

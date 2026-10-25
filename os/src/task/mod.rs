@@ -9,6 +9,8 @@
 //! Be careful when you see `__switch` ASM function in `switch.S`. Control flow around this function
 //! might not be what you expect.
 
+// AI 学习协助：本文件的实验增量由 AI 助手协助实现，逐处说明见 Study/修改记录。
+// 参考：https://learningos.cn/rCore-Tutorial-Guide/chapter4/；原始代码来自课程模板，未改动官方评测器。
 mod context;
 mod switch;
 #[allow(clippy::module_inception)]
@@ -201,4 +203,31 @@ pub fn current_trap_cx() -> &'static mut TrapContext {
 /// Change the current 'Running' task's program break
 pub fn change_program_brk(size: i32) -> Option<usize> {
     TASK_MANAGER.change_current_program_brk(size)
+}
+
+/// Record before syscall dispatch, including the trace query itself.
+pub fn record_syscall(id: usize) {
+    let mut inner = TASK_MANAGER.inner.exclusive_access();
+    let current = inner.current_task;
+    if let Some(count) = inner.tasks[current].syscall_counts.get_mut(id) { *count += 1; }
+}
+
+/// Query the current task's counter without indexing outside the table.
+pub fn syscall_count(id: usize) -> usize {
+    let inner = TASK_MANAGER.inner.exclusive_access();
+    inner.tasks[inner.current_task].syscall_counts.get(id).copied().unwrap_or(0)
+}
+
+/// Add anonymous user mappings to the current task.
+pub fn mmap_current(start: usize, len: usize, prot: usize) -> isize {
+    let mut inner = TASK_MANAGER.inner.exclusive_access();
+    let current = inner.current_task;
+    inner.tasks[current].memory_set.mmap(start, len, prot)
+}
+
+/// Release anonymous/user mappings belonging to the current task.
+pub fn munmap_current(start: usize, len: usize) -> isize {
+    let mut inner = TASK_MANAGER.inner.exclusive_access();
+    let current = inner.current_task;
+    inner.tasks[current].memory_set.munmap(start, len)
 }

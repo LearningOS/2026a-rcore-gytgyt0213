@@ -6,11 +6,14 @@
 //!
 //! Every task or process has a memory_set to control its virtual memory.
 
+// AI 学习协助：本文件的实验增量由 AI 助手协助实现，逐处说明见 Study/修改记录。
+// 参考：https://learningos.cn/rCore-Tutorial-Guide/chapter4/；原始代码来自课程模板，未改动官方评测器。
 mod address;
 mod frame_allocator;
 mod heap_allocator;
 mod memory_set;
 mod page_table;
+pub use page_table::{checked_user_buffer, copy_to_user};
 
 pub use address::{PhysAddr, PhysPageNum, VirtAddr, VirtPageNum};
 use address::{StepByOne, VPNRange};
