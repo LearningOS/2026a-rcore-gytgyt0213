@@ -9,6 +9,8 @@
 //! Be careful when you see `__switch` ASM function in `switch.S`. Control flow around this function
 //! might not be what you expect.
 
+// AI 学习协助：本文件的实验增量由 AI 助手协助实现，逐处说明见 Study/修改记录。
+// 参考：https://learningos.cn/rCore-Tutorial-Guide/chapter3/；原始代码来自课程模板，未改动官方评测器。
 mod context;
 mod switch;
 #[allow(clippy::module_inception)]
@@ -18,6 +20,7 @@ use crate::config::MAX_APP_NUM;
 use crate::loader::{get_num_app, init_app_cx};
 use crate::sync::UPSafeCell;
 use lazy_static::*;
+use alloc::{vec, vec::Vec};
 use switch::__switch;
 pub use task::{TaskControlBlock, TaskStatus};
 
@@ -45,6 +48,8 @@ pub struct TaskManagerInner {
     tasks: [TaskControlBlock; MAX_APP_NUM],
     /// id of current `Running` task
     current_task: usize,
+    /// Counters belong to each task, not to the currently running CPU.
+    syscall_counts: Vec<Vec<usize>>,
 }
 
 lazy_static! {
@@ -65,6 +70,7 @@ lazy_static! {
                 UPSafeCell::new(TaskManagerInner {
                     tasks,
                     current_task: 0,
+                    syscall_counts: vec![vec![0; 512]; num_app],
                 })
             },
         }
@@ -168,4 +174,19 @@ pub fn suspend_current_and_run_next() {
 pub fn exit_current_and_run_next() {
     mark_current_exited();
     run_next_task();
+}
+
+/// Count before dispatch, so a trace query includes the query itself.
+pub fn record_syscall(id: usize) {
+    let mut inner = TASK_MANAGER.inner.exclusive_access();
+    let current = inner.current_task;
+    if let Some(count) = inner.syscall_counts[current].get_mut(id) {
+        *count += 1;
+    }
+}
+
+/// Read one counter of the current task; unknown syscall IDs count as zero.
+pub fn syscall_count(id: usize) -> usize {
+    let inner = TASK_MANAGER.inner.exclusive_access();
+    inner.syscall_counts[inner.current_task].get(id).copied().unwrap_or(0)
 }
