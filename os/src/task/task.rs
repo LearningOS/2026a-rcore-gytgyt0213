@@ -1,4 +1,6 @@
 //! Types related to task management & Functions for completely changing TCB
+// AI 学习协助：本文件的实验增量由 AI 助手协助实现，逐处说明见 Study/修改记录。
+// 参考：https://learningos.cn/rCore-Tutorial-Guide/chapter5/；原始代码来自课程模板，未改动官方评测器。
 use super::TaskContext;
 use super::{kstack_alloc, pid_alloc, KernelStack, PidHandle};
 use crate::config::TRAP_CONTEXT_BASE;
@@ -68,6 +70,10 @@ pub struct TaskControlBlockInner {
 
     /// Program break
     pub program_brk: usize,
+    /// Scheduling weight; larger values receive more CPU time.
+    pub priority: usize,
+    /// Accumulated virtual runtime for stride scheduling.
+    pub stride: u128,
 }
 
 impl TaskControlBlockInner {
@@ -118,6 +124,8 @@ impl TaskControlBlock {
                     exit_code: 0,
                     heap_bottom: user_sp,
                     program_brk: user_sp,
+                    priority: 16,
+                    stride: 0,
                 })
             },
         };
@@ -146,6 +154,9 @@ impl TaskControlBlock {
         let mut inner = self.inner_exclusive_access();
         // substitute memory_set
         inner.memory_set = memory_set;
+        inner.base_size = user_sp;
+        inner.heap_bottom = user_sp;
+        inner.program_brk = user_sp;
         // update trap_cx ppn
         inner.trap_cx_ppn = trap_cx_ppn;
         // initialize base_size
@@ -191,6 +202,8 @@ impl TaskControlBlock {
                     exit_code: 0,
                     heap_bottom: parent_inner.heap_bottom,
                     program_brk: parent_inner.program_brk,
+                    priority: parent_inner.priority,
+                    stride: 0,
                 })
             },
         });
